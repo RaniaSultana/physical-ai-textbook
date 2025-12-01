@@ -1,0 +1,10 @@
+{
+  "name": "physical-ai-textbook-web",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "start": "node ./scripts/dev-server.js",
+    "build": "node ./scripts/build.js",
+    "deploy": "echo \"Deploy: configure GH Pages or Vercel\""
+  }
+}

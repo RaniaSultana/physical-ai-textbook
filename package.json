@@ -1,0 +1,13 @@
+{
+  "name": "physical-ai-textbook",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "web:start": "yarn --cwd apps/web start",
+    "web:build": "yarn --cwd apps/web build",
+    "web:deploy": "yarn --cwd apps/web deploy"
+  }
+}
