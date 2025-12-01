@@ -1,12 +1,13 @@
 import os
 import json
-from typing import Optional
+from typing import Optional, List
 from fastapi import FastAPI, WebSocket, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import anthropic
 import openai
 import logging
+from rag_service import get_rag_service
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -77,6 +78,37 @@ class RAGSearchResult(BaseModel):
     score: float
     metadata: Optional[dict] = None
 
+class IngestRequest(BaseModel):
+    """Request to ingest a document into RAG."""
+    id: str
+    title: str
+    text: str
+
+class IngestResponse(BaseModel):
+    """Response from document ingestion."""
+    status: str
+    doc_id: str
+    message: str
+
+class QueryRequest(BaseModel):
+    """Request to query RAG system."""
+    query: str
+    top_k: int = 5
+    context_ids: Optional[List[str]] = None
+
+class QueryResult(BaseModel):
+    """Single result from RAG query."""
+    source_id: str
+    title: str
+    text: str
+    score: float
+
+class QueryResponse(BaseModel):
+    """Response from RAG query."""
+    query: str
+    results: List[QueryResult]
+    count: int
+
 # ============== API Endpoints ==============
 
 @app.get("/")
@@ -86,7 +118,7 @@ async def root():
         "name": "Physical AI Textbook Backend",
         "version": "0.1.0",
         "status": "running",
-        "endpoints": ["/chat", "/embed", "/rag-search", "/ws"]
+        "endpoints": ["/chat", "/embed", "/rag-search", "/ingest", "/query", "/ws"]
     }
 
 @app.post("/chat", response_model=ChatResponse)
@@ -207,6 +239,81 @@ async def rag_search(request: RAGSearchRequest) -> dict:
     
     # TODO: Real Qdrant integration
     return {"query": request.query, "results": [], "count": 0}
+
+@app.post("/ingest", response_model=IngestResponse)
+async def ingest(request: IngestRequest) -> IngestResponse:
+    """
+    Ingest a document into the RAG system.
+    
+    Stores document metadata in Postgres and embeddings in Qdrant.
+    
+    Args:
+        id: Unique document identifier
+        title: Document title
+        text: Document content
+    
+    Returns:
+        Status response with document ID and message
+    """
+    rag_service = get_rag_service()
+    
+    success = rag_service.ingest(
+        doc_id=request.id,
+        title=request.title,
+        text=request.text
+    )
+    
+    if success:
+        return IngestResponse(
+            status="success",
+            doc_id=request.id,
+            message=f"Document '{request.title}' ingested successfully"
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to ingest document '{request.id}'"
+        )
+
+@app.post("/query", response_model=QueryResponse)
+async def query(request: QueryRequest) -> QueryResponse:
+    """
+    Query the RAG system for similar documents.
+    
+    Generates an embedding for the query and returns top-k most similar passages.
+    
+    Args:
+        query: Query string
+        top_k: Number of results to return (default 5)
+        context_ids: Optional list of source IDs to filter results
+    
+    Returns:
+        Query results with source metadata and similarity scores
+    """
+    rag_service = get_rag_service()
+    
+    results = rag_service.query(
+        query_text=request.query,
+        top_k=request.top_k,
+        context_ids=request.context_ids
+    )
+    
+    # Convert to response model
+    query_results = [
+        QueryResult(
+            source_id=r["source_id"],
+            title=r["title"],
+            text=r["text"],
+            score=r["score"]
+        )
+        for r in results
+    ]
+    
+    return QueryResponse(
+        query=request.query,
+        results=query_results,
+        count=len(query_results)
+    )
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
