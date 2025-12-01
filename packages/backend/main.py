@@ -83,6 +83,8 @@ class IngestRequest(BaseModel):
     id: str
     title: str
     text: str
+    session: Optional[bool] = False
+    session_id: Optional[str] = None
 
 class IngestResponse(BaseModel):
     """Response from document ingestion."""
@@ -95,6 +97,8 @@ class QueryRequest(BaseModel):
     query: str
     top_k: int = 5
     context_ids: Optional[List[str]] = None
+    restrict_to_session: Optional[bool] = False
+    session_id: Optional[str] = None
 
 class QueryResult(BaseModel):
     """Single result from RAG query."""
@@ -260,7 +264,9 @@ async def ingest(request: IngestRequest) -> IngestResponse:
     success = rag_service.ingest(
         doc_id=request.id,
         title=request.title,
-        text=request.text
+        text=request.text,
+        session=request.session,
+        session_id=request.session_id
     )
     
     if success:
@@ -295,7 +301,9 @@ async def query(request: QueryRequest) -> QueryResponse:
     results = rag_service.query(
         query_text=request.query,
         top_k=request.top_k,
-        context_ids=request.context_ids
+        context_ids=request.context_ids,
+        restrict_to_session=bool(request.restrict_to_session),
+        session_id=request.session_id
     )
     
     # Convert to response model

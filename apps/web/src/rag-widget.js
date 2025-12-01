@@ -140,7 +140,9 @@
         const query = input.value.trim();
         if (!query) return;
 
-        await handleQuery(query);
+        // honor session if set on global
+        const session = window.__ragWidget?.session;
+        await handleQuery(query, session);
         input.value = '';
       });
     }
@@ -180,7 +182,8 @@
     }
   }
 
-  async function handleQuery(query) {
+  // Allow optional session object: { sessionId, restrict }
+  async function handleQuery(query, session) {
     const messagesDiv = document.getElementById('rag-messages');
     const sendBtn = document.getElementById('rag-send');
 
@@ -198,11 +201,17 @@
     sendBtn.textContent = '...';
 
     try {
-      // Query RAG
+      // Query RAG (include session restriction if provided)
+      const body = { query, top_k: 3 };
+      if (session && session.restrict && session.sessionId) {
+        body.restrict_to_session = true;
+        body.session_id = session.sessionId;
+      }
+
       const queryResponse = await fetch(`${API_BASE_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, top_k: 3 })
+        body: JSON.stringify(body)
       });
 
       const queryData = await queryResponse.json();

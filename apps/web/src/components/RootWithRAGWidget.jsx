@@ -1,6 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import RagChatWidget from './RagChatWidget';
 import ChapterRAGCTA from './ChapterRAGCTA';
+import SelectionAskButton from './SelectionAskButton';
 
 /**
  * RootWithRAGWidget - Root layout wrapper that provides RAG widget context
@@ -103,7 +104,17 @@ export const RootWithRAGWidget: React.FC<RootWithRAGWidgetProps> = ({ children }
         chapterTitle={currentChapter.title}
         chapterText={currentChapter.text}
         chapterUrl={currentChapter.url}
+        selectionSession={window.__ragWidget?.session}
+        onSessionClear={() => { if (window.__ragWidget) window.__ragWidget.session = null; }}
       />
+
+      {/* Selection-Aware CTA */}
+      <SelectionAskButton onSessionCreated={({ sessionId, docId }) => {
+        // set global session and open widget
+        window.__ragWidget = window.__ragWidget || {};
+        window.__ragWidget.session = { sessionId, restrict: true };
+        setIsWidgetOpen(true);
+      }} />
 
       {/* Make CTA available globally via window object for manual injection */}
       {typeof window !== 'undefined' && (

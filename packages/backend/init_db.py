@@ -21,12 +21,14 @@ def init_database():
         conn = psycopg2.connect(db_url)
         cursor = conn.cursor()
         
-        # Create sources table
+        # Create sources table (include optional session metadata)
         create_table_sql = """
         CREATE TABLE IF NOT EXISTS sources (
             id TEXT PRIMARY KEY,
             title TEXT NOT NULL,
             text TEXT NOT NULL,
+            session_id TEXT NULL,
+            session BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         """

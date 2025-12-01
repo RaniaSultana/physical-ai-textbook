@@ -129,13 +129,19 @@ export const RagChatWidget: React.FC<RagChatWidgetProps> = ({
    */
   const queryRAG = async (query: string) => {
     try {
+      // include optional session restriction if present on global widget
+      const session = (window as any).__ragWidget?.session;
+
+      const body: any = { query, top_k: 3 };
+      if (session && session.restrict && session.sessionId) {
+        body.restrict_to_session = true;
+        body.session_id = session.sessionId;
+      }
+
       const response = await fetch(`${API_BASE_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query,
-          top_k: 3
-        })
+        body: JSON.stringify(body)
       });
 
       if (!response.ok) {
@@ -215,7 +221,7 @@ Be concise and clear.`;
     setError(null);
 
     try {
-      // Query RAG for sources
+      // Query RAG for sources (honor selection session if set)
       const sources = await queryRAG(trimmedInput);
 
       if (sources.length === 0) {

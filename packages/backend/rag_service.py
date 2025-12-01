@@ -117,7 +117,7 @@ class RAGService:
             logger.error(f"Failed to generate embedding: {e}")
             return None
     
-    def ingest(self, doc_id: str, title: str, text: str) -> bool:
+    def ingest(self, doc_id: str, title: str, text: str, session: bool = False, session_id: Optional[str] = None) -> bool:
         """
         Ingest a document into RAG system.
         
@@ -140,29 +140,37 @@ class RAGService:
                 logger.error(f"Failed to embed document {doc_id}")
                 return False
             
-            # Store in Postgres
+            # Store in Postgres (include session metadata if present)
             if self.db_conn:
                 cursor = self.db_conn.cursor()
                 insert_sql = """
-                INSERT INTO sources (id, title, text) VALUES (%s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, text = EXCLUDED.text;
+                INSERT INTO sources (id, title, text, session_id, session)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, text = EXCLUDED.text, session_id = EXCLUDED.session_id, session = EXCLUDED.session;
                 """
-                cursor.execute(insert_sql, (doc_id, title, text))
+                cursor.execute(insert_sql, (doc_id, title, text, session_id, session))
                 self.db_conn.commit()
                 cursor.close()
-                logger.info(f"✓ Stored document {doc_id} in Postgres")
+                logger.info(f"✓ Stored document {doc_id} in Postgres (session={session} session_id={session_id})")
             
             # Upsert to Qdrant
             if self.qdrant_client:
                 # Create point with embedding and metadata
+                # Include session metadata in Qdrant payload so we can filter by session
+                payload = {
+                    "source_id": doc_id,
+                    "title": title,
+                    "text": text[:500]
+                }
+                if session_id:
+                    payload["session_id"] = session_id
+                if session:
+                    payload["session"] = True
+
                 point = PointStruct(
                     id=hash(doc_id) % (2**31),  # Use hash for numeric ID
                     vector=embedding,
-                    payload={
-                        "source_id": doc_id,
-                        "title": title,
-                        "text": text[:500]  # Store truncated text in metadata
-                    }
+                    payload=payload
                 )
                 
                 self.qdrant_client.upsert(
@@ -181,7 +189,9 @@ class RAGService:
         self,
         query_text: str,
         top_k: int = 5,
-        context_ids: Optional[List[str]] = None
+        context_ids: Optional[List[str]] = None,
+        restrict_to_session: bool = False,
+        session_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Query RAG system and return top-k passages.
@@ -205,12 +215,55 @@ class RAGService:
             
             # Search Qdrant
             if self.qdrant_client:
-                search_results = self.qdrant_client.search(
-                    collection_name=self.collection_name,
-                    query_vector=query_embedding,
-                    limit=top_k,
-                    with_payload=True
-                )
+                # Build optional filter to restrict to a session
+                query_filter = None
+                if restrict_to_session and session_id:
+                    try:
+                        query_filter = models.Filter(
+                            must=[
+                                models.FieldCondition(
+                                    key="session_id",
+                                    match=models.MatchValue(value=session_id)
+                                )
+                            ]
+                        )
+                    except Exception:
+                        query_filter = None
+
+                # Attempt search with filter when available
+                try:
+                    if query_filter is not None:
+                        search_results = self.qdrant_client.search(
+                            collection_name=self.collection_name,
+                            query_vector=query_embedding,
+                            limit=top_k,
+                            with_payload=True,
+                            query_filter=query_filter
+                        )
+                    else:
+                        search_results = self.qdrant_client.search(
+                            collection_name=self.collection_name,
+                            query_vector=query_embedding,
+                            limit=top_k,
+                            with_payload=True
+                        )
+                except TypeError:
+                    # Some qdrant-client versions use 'filter' param name
+                    if query_filter is not None:
+                        search_results = self.qdrant_client.search(
+                            collection_name=self.collection_name,
+                            query_vector=query_embedding,
+                            limit=top_k,
+                            with_payload=True,
+                            filter=query_filter
+                        )
+                    else:
+                        search_results = self.qdrant_client.search(
+                            collection_name=self.collection_name,
+                            query_vector=query_embedding,
+                            limit=top_k,
+                            with_payload=True
+                        )
                 
                 # Process results
                 for hit in search_results:
@@ -229,14 +282,23 @@ class RAGService:
                 
                 logger.info(f"✓ Query returned {len(results)} results from Qdrant")
             
-            # If no results and Postgres available, return all matching source_ids
-            if not results and self.db_conn:
+            # If no results and Postgres available, return matching rows
+            if (not results) and self.db_conn:
                 cursor = self.db_conn.cursor()
-                select_sql = "SELECT id, title, text FROM sources LIMIT %s;"
-                cursor.execute(select_sql, (top_k,))
+                if restrict_to_session and session_id:
+                    select_sql = "SELECT id, title, text FROM sources WHERE session_id = %s LIMIT %s;"
+                    cursor.execute(select_sql, (session_id, top_k))
+                elif context_ids:
+                    # Use context_ids to filter
+                    select_sql = sql.SQL("SELECT id, title, text FROM sources WHERE id = ANY(%s) LIMIT %s;")
+                    cursor.execute(select_sql, (context_ids, top_k))
+                else:
+                    select_sql = "SELECT id, title, text FROM sources LIMIT %s;"
+                    cursor.execute(select_sql, (top_k,))
+
                 rows = cursor.fetchall()
                 cursor.close()
-                
+
                 for row in rows:
                     results.append({
                         "source_id": row[0],
