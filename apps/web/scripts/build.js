@@ -21,7 +21,7 @@ const html = `<!doctype html>
 </head>
 <body>
   <h1>Physical AI Textbook (scaffold)</h1>
-  <p>This is a minimal scaffold that stands in for a Docusaurus site until the environment can run `create-docusaurus`.</p>
+  <p>This is a minimal scaffold that stands in for a Docusaurus site until the environment can run create-docusaurus.</p>
   <h2>Docs</h2>
   <ul>
     ${docsIndex}
